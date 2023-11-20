@@ -1,6 +1,7 @@
 from lightning.pytorch.cli import LightningCLI
-from datamodule import DataModule
-from model import AVE3Net
+from ave3net.datamodule import DataModule
+# from data.datamodule import DataModule
+from ave3net.model import AVE3Net
 import sys
 import torch
 import os

@@ -32,6 +32,13 @@ dataset is too complicated
 add images in BA (input waveform -> input features -> mask -> applied mask -> out features -> output waveform)
 add audios to github and write about it in ba
 
+take shufflenet NOT pretrained
+check pad_signal
+lsmt check hidden state
+check different amount audio/video lsmt block
+check loss function: negative si-sdr OR stft with power-law compressed phase-aware (PLCPA)
+take default torch stft + PLCPA
+
 BA structure:
 
 \section{Introduction}

@@ -26,5 +26,5 @@ trainer:
 #   lr: 0.0005
 #   wd: 0.0001
 data:
-  batch_size: 16
-# ckpt_path: lightning_logs/version_86/checkpoints/checkpoint.ckpt
+  batch_size: 8
+ckpt_path: lightning_logs/version_99/checkpoints/checkpoint.ckpt

@@ -1,7 +1,7 @@
 import torchaudio
-from datamodule import DataModule
+from data.datamodule import DataModule
 from utils.plot_waveforms import plot_waveforms
-from model import AVE3Net
+from ave3net.model import AVE3Net
 import torch
 from torchvision import transforms
 import time
@@ -13,7 +13,7 @@ datamodule.setup("test")
 
 train_dataloader = datamodule.test_dataloader()
 model = AVE3Net.load_from_checkpoint(
-    checkpoint_path="lightning_logs/version_86/checkpoints/checkpoint.ckpt",
+    checkpoint_path="lightning_logs/version_99/checkpoints/checkpoint.ckpt",
     map_location=torch.device('cpu')
 )
 
@@ -71,9 +71,12 @@ def process_with_rtf(model: AVE3Net, vframes: torch.Tensor, noisy: torch.Tensor)
 
 
 x_hat, rtf = process_with_rtf(model, vframes, noisy)
+x_hat = x_hat.detach()
 print('rtf', rtf)
 
 torchaudio.save("x_hat.wav", x_hat, 16000)
+torchaudio.save("clean.wav", clean, 16000)
+torchaudio.save("noisy.wav", noisy, 16000)
 # torchaudio.save("clean.wav", clean, 16000)
 # torchaudio.save("noisy.wav", a, 16000)
 

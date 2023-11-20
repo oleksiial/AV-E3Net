@@ -1,6 +1,6 @@
 import lightning.pytorch as pl
 from torch.utils.data import DataLoader
-from ave3net.dataset import Dataset
+from data.dataset import Dataset
 from utils.plot_waveforms import plot_waveforms
 import utils.logger as logger
 from typing import List, Tuple
@@ -15,11 +15,11 @@ class DataModule(pl.LightningDataModule):
 
     def setup(self, stage: str):
         if stage == "fit":
-            self.train = Dataset('train_avgen.tsv')
-            self.valid = Dataset('valid_avgen.tsv')
+            self.train = Dataset('train', 's1')
+            self.valid = Dataset('valid', 's1')
 
         if stage == 'test':
-            self.test = Dataset('test_avgen.tsv')
+            self.test = Dataset('test', 's1')
 
     def train_dataloader(self):
         return DataLoader(self.train, batch_size=self.batch_size, num_workers=12, collate_fn=self.collate_fn)
@@ -65,4 +65,4 @@ if __name__ == "__main__":
     noisy_waveform = noisy_list[0]
     clean_waveform = clean_list[0]
 
-    # plot_2_waveform(noisy_waveform, clean_waveform, 16000, 'noisy', 'clean')
+    plot_waveforms(16000, [(noisy_waveform, 'noisy'), (clean_waveform, 'clean')])

@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from utils.save_fig import save_fig
 from typing import List, Tuple
-from shufflenet_encoder import _shufflenetv2_05
+from ave3net.shufflenet_encoder import _shufflenetv2_05
 from torchmetrics.functional.audio import scale_invariant_signal_distortion_ratio, perceptual_evaluation_speech_quality, signal_distortion_ratio
 import utils.logger as logger
 
@@ -101,7 +101,7 @@ class LSTMBlock(nn.Module):
 class AVE3NetModule(nn.Module):
     def __init__(self, fusion_block, n_lstm=4):
         super().__init__()
-        self.debug_logger = logger.get_logger(self.__class__.__name__, logger.logging.NOTSET)
+        self.debug_logger = logger.get_logger(self.__class__.__name__, logger.logging.DEBUG)
 
         self.ha = None
         self.hv = None
@@ -130,6 +130,7 @@ class AVE3NetModule(nn.Module):
     def pad_signal(self, input):
         # input is the waveforms: (B, T) or (B, 1, T)
         # reshape and padding
+        self.debug_logger.debug(f'pad_signal input {input.shape}')
         if input.dim() not in [2, 3]:
             raise RuntimeError("Input can only be 2 or 3 dimensional.")
 
@@ -139,15 +140,32 @@ class AVE3NetModule(nn.Module):
         nsample = input.size(2)
         rest = self.window - (self.stride + nsample %
                               self.window) % self.window
-        if rest > 0:
-            pad = Variable(torch.zeros(batch_size, 1, rest)).type(input.type())
-            input = torch.cat([input, pad], 2)
+        
+        self.debug_logger.debug(f'batch_size {batch_size}')
+        self.debug_logger.debug(f'nsample {nsample}')
+        self.debug_logger.debug(f'rest {rest}')
+        self.debug_logger.debug(f'self.stride {self.stride}')
+        self.debug_logger.debug(f'self.window {self.window}')
+
+
+        # if rest > 0:
+        #     pad = Variable(torch.zeros(batch_size, 1, rest)).type(input.type())
+        #     self.debug_logger.debug(f'pad {pad.shape}')
+
+        #     input = torch.cat([input, pad], 2)
 
         pad_aux = Variable(torch.zeros(
             batch_size, 1, self.stride)).type(input.type())
+
+        self.debug_logger.debug(f'pad_aux {pad_aux.shape}')
+
         input = torch.cat([pad_aux, input, pad_aux], 2)
 
-        return input, rest
+        self.debug_logger.debug(f'pad_signal output/rest {input.shape}/{rest}')
+
+
+        # return input, rest
+        return input, 0
 
     # def on_after_backward(self) -> None:
     #     print("on_before_opt enter")
@@ -216,7 +234,9 @@ class AVE3NetModule(nn.Module):
         # LSMT blocks
 
         # upsample video
+        self.debug_logger.debug(f'vx.shape/ax.shape {vx.shape}/{ax.shape} --- {vx[0].mean(1)}')
         vx = F.interpolate(vx.transpose(1, 2), ax.size(1)).transpose(1, 2)
+        self.debug_logger.debug(f'vx.shape/ax.shape {vx.shape}/{ax.shape} --- {vx[0].mean(1)}')
         # initialize dense sums
         dense_audio = torch.zeros_like(ax)
         dense_video = torch.zeros_like(vx)
@@ -224,7 +244,7 @@ class AVE3NetModule(nn.Module):
         ha, hv = self.ha, self.hv
         for lstm in self.lstm_blocks:
             (vx, ax), dense_audio, dense_video, ha, hv = lstm((vx, ax), dense_audio, dense_video, ha, hv)
-        self.ha, self.hv = ha, hv
+        # self.ha, self.hv = ha, hv
 
         ##############
 
@@ -282,14 +302,14 @@ class AVE3Net(pl.LightningModule):
         self.log("train_loss", loss, prog_bar=True, batch_size=16)
         return loss
 
-    def validation_step(self, batch: Tuple[List[Tensor], List[Tensor], List[Tensor]], batch_idx):
-        self.ha = None
-        self.hv = None
+    # def validation_step(self, batch: Tuple[List[Tensor], List[Tensor], List[Tensor]], batch_idx):
+    #     self.ha = None
+    #     self.hv = None
 
-        x_hat, clean = self.process_batch(batch, batch_idx)
-        loss = nn.functional.mse_loss(x_hat, clean)
-        self.log("validation_loss", loss, prog_bar=True, sync_dist=True, batch_size=16)
-        return loss
+    #     x_hat, clean = self.process_batch(batch, batch_idx)
+    #     loss = nn.functional.mse_loss(x_hat, clean)
+    #     self.log("validation_loss", loss, prog_bar=True, sync_dist=True, batch_size=16)
+    #     return loss
 
     def test_step(self, batch: Tuple[List[Tensor], List[Tensor], List[Tensor]], batch_idx):
         self.ha = None
@@ -321,5 +341,5 @@ if __name__ == "__main__":
     data = [(torch.rand((16, 25, 3, 96, 96)), torch.rand((16, 1, 16000)))]
     summary(AVE3Net(), input_data=data, col_names=["input_size",
                                                    "output_size",
-                                                   "num_params"], depth=3)
+                                                   "num_params"], depth=2)
     # summary(AVE3Net(), input_size=(1, 60000))

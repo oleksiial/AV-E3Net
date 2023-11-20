@@ -1,0 +1,31 @@
+# lightning.pytorch==2.0.6
+seed_everything: 12345
+trainer:
+  devices: 1
+  # profiler:
+  #   class_path: lightning.pytorch.profilers.AdvancedProfiler
+  #   init_args:
+  #     filename: profiler-advanced
+  #     dirpath: .
+  # strategy: ddp_find_unused_parameters_true
+  # callbacks:
+  #   - class_path: lightning.pytorch.callbacks.EarlyStopping
+  #     init_args:
+  #       patience: 3
+  #       mode: min
+  #       monitor: validation_loss
+  #   - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+  #     init_args:
+  #       monitor: validation_loss
+  #       mode: min
+  #       filename: checkpoint
+  # fast_dev_run: true
+  # max_epochs: 1
+  max_steps: 10
+  deterministic: true
+# model:
+#   lr: 0.0005
+#   wd: 0.0001
+data:
+  batch_size: 8
+# ckpt_path: lightning_logs/version_86/checkpoints/checkpoint.ckpt
