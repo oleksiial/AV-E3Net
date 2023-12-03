@@ -16,14 +16,14 @@ How does real-time work? +
 layernorm
 
 dataset lrs3 only from Julius:
-train 2 times: 1st with mix and s1 as target speaker, 2nd with mix and s2 as target speaker. s1 is louder as s2.
+train 2 times: 1st with mix and s1 as target speaker, 2nd with mix and s2 as target speaker. s1 is louder as s2. +
 2 secons gecropped
 
 
 todo 
 
 AO vs AV compare vs Naive AV
-new dataset with interfering speakers
+new dataset with interfering speakers + 
 Different SNR
 chunk input for real-time 160=10ms=4frames (640 = 40ms = 1 video frame) samples 1 frame
 LSTM 100 Hz.
@@ -32,10 +32,10 @@ dataset is too complicated
 add images in BA (input waveform -> input features -> mask -> applied mask -> out features -> output waveform)
 add audios to github and write about it in ba
 
-take shufflenet NOT pretrained
+take shufflenet NOT pretrained +
 check pad_signal
-lsmt check hidden state
-check different amount audio/video lsmt block
+lsmt check hidden state +
+check different amount audio/video lsmt block +
 check loss function: negative si-sdr OR stft with power-law compressed phase-aware (PLCPA)
 take default torch stft + PLCPA
 

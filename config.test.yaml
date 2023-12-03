@@ -5,26 +5,7 @@ trainer:
   accelerator: cpu
   devices: 1
   #######
-
-  # strategy: ddp_find_unused_parameters_true
-  callbacks:
-    - class_path: lightning.pytorch.callbacks.EarlyStopping
-      init_args:
-        patience: 3
-        mode: min
-        monitor: validation_loss
-    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-      init_args:
-        monitor: validation_loss
-        mode: min
-        filename: checkpoint
-  fast_dev_run: true
-  max_epochs: 10
-  # max_steps: 1
-  deterministic: true
-# model:
-#   lr: 0.0005
-#   wd: 0.0001
+  benchmark: true # speeds up training time
 data:
-  batch_size: 8
-ckpt_path: lightning_logs/version_99/checkpoints/checkpoint.ckpt
+  batch_size: 24
+ckpt_path: lightning_logs/version_149/checkpoints/checkpoint.ckpt

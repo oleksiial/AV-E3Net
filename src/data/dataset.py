@@ -10,16 +10,22 @@ from torchdata.datapipes.iter import FileLister
 
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, split, target_speaker, audio_only=False):  # split train - valid - test
+    def __init__(self, split, audio_only=False):  # split train - valid - test
         self.logger = logger.get_logger(self.__class__.__name__, logger.logging.NOTSET)
         self.ROOT = '/data/LRS3-kai-2sp'
         self.split = split
         self.audio_only = audio_only
 
         self.mix = list(FileLister(root=(self.ROOT + '/' + self.split + '/mix')))
-        self.clean = list(FileLister(root=(self.ROOT + '/' + self.split + '/' + target_speaker)))
+        self.clean_s1 = list(FileLister(root=(self.ROOT + '/' + self.split + '/s1')))
+        self.clean_s2 = list(FileLister(root=(self.ROOT + '/' + self.split + '/s2')))
+
+        self.mix = self.mix + self.mix
+        self.clean = self.clean_s1 + self.clean_s2
 
     def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        self.logger.debug('__getitem__ start')
+
         noisy_path = self.mix[i]
         clean_path = self.clean[i]
         
@@ -32,29 +38,32 @@ class Dataset(torch.utils.data.Dataset):
         if self.audio_only:
             return noisy_waveform, clean_waveform
 
-        speaker_id = noisy_path.split('_')[0].split('/')[-1]
-        video_id = noisy_path.split('_')[1]
+        speaker_id = noisy_path.split('_')[0].split('/')[-1] if "/s1/" in clean_path else noisy_path.split('_')[3]
+        video_id = noisy_path.split('_')[1] if "/s1/" in clean_path else noisy_path.split('_')[4]
 
         video_path = self.ROOT + '/' + self.split + '/roi/' + speaker_id + '/' + video_id + '.mp4'
 
-        vframes, _aframes, _info = torchvision.io.read_video(
-            video_path, pts_unit='sec', output_format='TCHW')  # pts_init to avoid warning
-        
-        self.logger.debug(f'vframes.shape: {vframes.shape}')  # vframes.shape: [80, 3, 96, 96]
-        # normalization for shufflenet https://pytorch.org/hub/pytorch_vision_shufflenet_v2/
-        # preprocess = torchvision.transforms.Compose([
-        #     torchvision.transforms.Resize(224),
-        #     torchvision.transforms.CenterCrop(224),
-        #     torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        # ])
-        # vframes = preprocess(vframes)
+        self.logger.debug(f'noisy_path: {noisy_path}')
+        self.logger.debug(f'clean_path: {clean_path}')
+        self.logger.debug(f'video_path: {video_path}')
+
+
+        vframes, _aframes, _info = torchvision.io.read_video(video_path, pts_unit='sec', output_format='TCHW')  # pts_init to avoid warning
+        self.logger.debug(f'vframes.shape: {vframes.shape}')
         vframes = vframes / 255
-        return vframes, noisy_waveform, clean_waveform  
+
+        self.logger.debug('__getitem__ end')
+
+        return vframes, noisy_waveform, clean_waveform
 
     def __len__(self):
         return len(self.mix)
 
 
 if __name__ == '__main__':
-    dataset = Dataset('train', 's1', True)
-    noisy, clean = dataset[20]
+    dataset = Dataset('test')
+    vframes, noisy, clean, meta = dataset[2500]
+    print(len(dataset))
+    print(meta[0])
+    print(meta[1])
+    print(meta[2])

@@ -11,9 +11,9 @@ import torch.nn.functional as F
 datamodule = DataModule()
 datamodule.setup("test")
 
-train_dataloader = datamodule.test_dataloader()
+test_dataloader = datamodule.test_dataloader()
 model = AVE3Net.load_from_checkpoint(
-    checkpoint_path="lightning_logs/version_99/checkpoints/checkpoint.ckpt",
+    checkpoint_path="lightning_logs/version_133/checkpoints/checkpoint.ckpt",
     map_location=torch.device('cpu')
 )
 
@@ -21,7 +21,7 @@ model = AVE3Net.load_from_checkpoint(
 # model = AVE3Net()
 
 # x = (video, noisy_audio)
-vframes, noisy, clean = train_dataloader.dataset[205]
+vframes, noisy, clean = test_dataloader.dataset[205]
 
 # preprocess = transforms.Compose([
 #     # transforms.Resize(256),
@@ -70,9 +70,15 @@ def process_with_rtf(model: AVE3Net, vframes: torch.Tensor, noisy: torch.Tensor)
     return x_hat, rtf
 
 
-x_hat, rtf = process_with_rtf(model, vframes, noisy)
-x_hat = x_hat.detach()
-print('rtf', rtf)
+# x_hat, rtf = process_with_rtf(model, vframes, noisy)
+# x_hat = x_hat.detach()
+# print('rtf', rtf)
+
+x_hat = model((vframes, noisy))
+x_hat = x_hat.detach()[0]
+
+
+
 
 torchaudio.save("x_hat.wav", x_hat, 16000)
 torchaudio.save("clean.wav", clean, 16000)
@@ -80,5 +86,5 @@ torchaudio.save("noisy.wav", noisy, 16000)
 # torchaudio.save("clean.wav", clean, 16000)
 # torchaudio.save("noisy.wav", a, 16000)
 
-# plot_waveforms(16000, [(noisy, 'x'), (x_hat, 'x_hat'), (clean, 'clean')])
+plot_waveforms(16000, [(noisy, 'x'), (x_hat, 'x_hat'), (clean, 'clean')])
 print('done')

@@ -1,4 +1,5 @@
 import lightning.pytorch as pl
+import torch
 from torch.utils.data import DataLoader
 from data.dataset import Dataset
 from utils.plot_waveforms import plot_waveforms
@@ -15,11 +16,11 @@ class DataModule(pl.LightningDataModule):
 
     def setup(self, stage: str):
         if stage == "fit":
-            self.train = Dataset('train', 's1')
-            self.valid = Dataset('valid', 's1')
+            self.train = Dataset('train')
+            self.valid = Dataset('valid')
 
         if stage == 'test':
-            self.test = Dataset('test', 's1')
+            self.test = Dataset('test')
 
     def train_dataloader(self):
         return DataLoader(self.train, batch_size=self.batch_size, num_workers=12, collate_fn=self.collate_fn)
@@ -49,7 +50,7 @@ class DataModule(pl.LightningDataModule):
         noisy = [item[1] for item in batch]
         clean = [item[2] for item in batch]
         self.logger.debug(f'collate output: {video[0].shape} {noisy[0].shape} {clean[0].shape}')
-        return video, noisy, clean
+        return torch.stack(video), torch.stack(noisy), torch.stack(clean)
 
 
 if __name__ == "__main__":
