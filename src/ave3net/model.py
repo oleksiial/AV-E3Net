@@ -6,11 +6,14 @@ from torchinfo import summary
 from torch import Tensor, nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+from data.datamodule import DataModule
 from utils.save_fig import save_fig
+from utils.plot_waveforms import plot_waveforms
 from typing import List, Tuple
 from ave3net.shufflenet_encoder import _shufflenetv2_05
 from torchmetrics.functional.audio import scale_invariant_signal_distortion_ratio, perceptual_evaluation_speech_quality, signal_distortion_ratio
 import utils.logger as logger
+from torchaudio.transforms import AmplitudeToDB
 
 
 class ProjectionBlock(nn.Module):
@@ -42,13 +45,12 @@ class GSFusion(nn.Module):
     def forward(self, x, dense_audio):
         vx, ax = x
         # print('GS input', 'audio', ax.shape, 'video', vx.shape)
-        # vx = F.interpolate(vx.transpose(1, 2), ax.size(1)).transpose(1, 2)
         vx = torch.cat([ax, vx], dim=2)
         vx = self.gate(vx)
-        dense_audio += ax
-        ax *= vx
+        dense_audio = dense_audio + ax
+        ax = ax * vx
         ax = self.projection_block(ax)
-        ax += dense_audio
+        ax = ax + dense_audio
         ax = self.layernorm(ax)
         # print('GS output', ax.shape)
         return ax, dense_audio
@@ -60,10 +62,17 @@ class LSTMBlock(nn.Module):
 
         self.gsfusion = GSFusion()
 
-        self.map_to_high_dim_a = nn.Sequential(nn.Linear(512, 1024), nn.PReLU(),
-                                               nn.Linear(1024, 512), nn.PReLU(), nn.LayerNorm(512))
-        self.map_to_high_dim_v = nn.Sequential(nn.Linear(512, 1024), nn.PReLU(),
-                                               nn.Linear(1024, 512), nn.PReLU(), nn.LayerNorm(512))
+        self.map_to_high_dim_a = nn.Sequential(
+            nn.Linear(512, 1024), nn.PReLU(),
+            nn.Linear(1024, 512), nn.PReLU(),
+            nn.LayerNorm(512)
+        )
+
+        self.map_to_high_dim_v = nn.Sequential(
+            nn.Linear(512, 1024), nn.PReLU(),
+            nn.Linear(1024, 512), nn.PReLU(),
+            nn.LayerNorm(512)
+        )
 
         self.lstm_a = nn.LSTM(512, 512)
         self.layer_norm_a = nn.LayerNorm(512)
@@ -77,22 +86,15 @@ class LSTMBlock(nn.Module):
         ax, dense_audio = self.gsfusion((vx, ax), dense_audio)
 
         ax = self.map_to_high_dim_a(ax)
-        dense_audio += ax
-        if (ha != None):
-            ax, ha = self.lstm_a(ax, ha)
-        else:
-            ax, ha = self.lstm_a(ax)
-
+        dense_audio = dense_audio + ax
+        ax, ha = self.lstm_a(ax) if ha == None else self.lstm_a(ax, ha)
         ax = self.layer_norm_a(ax)
-        ax += dense_audio
+        ax = ax + dense_audio
         ax = self.layer_norm_a2(ax)
 
         vx = self.map_to_high_dim_v(vx)
-        dense_video += vx
-        if hv != None:
-            vx, hv = self.lstm_v(vx, hv)
-        else:
-            vx, hv = self.lstm_v(vx)
+        dense_video = dense_video + vx
+        vx, hv = self.lstm_v(vx) if hv == None else self.lstm_v(vx, hv)
         vx = self.layer_norm_v(vx)
         vx += dense_video
         vx = self.layer_norm_v2(vx)
@@ -111,7 +113,7 @@ class AVE3NetModule(nn.Module):
         # audio
         self.window = 320
         self.stride = 160
-        self.encoder = nn.Conv1d(1, 2048, kernel_size=self.window, stride=self.stride)
+        self.encoder = nn.Conv1d(1, out_channels=2048, kernel_size=self.window, stride=self.stride)
         self.l1 = nn.Sequential(nn.PReLU(), nn.LayerNorm(2048))
         self.audio_projection_block = ProjectionBlock(2048, 512)
         self.mask_prediction = nn.Sequential(nn.Linear(512, 2048), nn.Sigmoid())
@@ -139,44 +141,35 @@ class AVE3NetModule(nn.Module):
         if input.dim() == 2:
             input = input.unsqueeze(1)
         batch_size = input.size(0)
-        nsample = input.size(2)
-        rest = self.window - (self.stride + nsample %
-                              self.window) % self.window
+        nsamples = input.size(2)
+        rest = self.window - (self.stride + nsamples % self.window) % self.window
         
         self.debug_logger.debug(f'batch_size {batch_size}')
-        self.debug_logger.debug(f'nsample {nsample}')
+        self.debug_logger.debug(f'nsample {nsamples}')
         self.debug_logger.debug(f'rest {rest}')
         self.debug_logger.debug(f'self.stride {self.stride}')
         self.debug_logger.debug(f'self.window {self.window}')
-
 
         if rest > 0:
             pad = Variable(torch.zeros(batch_size, 1, rest)).type(input.type())
             self.debug_logger.debug(f'pad {pad.shape}')
             input = torch.cat([input, pad], 2)
 
-        pad_aux = Variable(torch.zeros(
-            batch_size, 1, self.stride)).type(input.type())
-
+        pad_aux = Variable(torch.zeros(batch_size, 1, self.stride)).type(input.type())
         self.debug_logger.debug(f'pad_aux {pad_aux.shape}')
-
         input = torch.cat([pad_aux, input, pad_aux], 2)
 
         self.debug_logger.debug(f'pad_signal output/rest {input.shape}/{rest}')
-
         return input, rest
-        # return input, 0
 
-    def on_after_backward(self) -> None:
-        print("on_before_opt enter")
-        for name, p in self.named_parameters():
-            if p.grad is None:
-                print(name)
-        print("on_before_opt exit")
+    # def on_after_backward(self) -> None:
+    #     print("on_before_opt enter")
+    #     for name, p in self.named_parameters():
+    #         if p.grad is None:
+    #             print(name)
+    #     print("on_before_opt exit")
 
     def forward(self, x: Tuple[Tensor, Tensor]) -> Tensor:
-        # times = time.time()
-
         """
         x of shape (vx, ax)
 
@@ -185,7 +178,6 @@ class AVE3NetModule(nn.Module):
         ax 3D (batch_size, channels=1, samples) or 2D without batch_size
         """
         self.debug_logger.debug('forward start')
-
 
         vx, ax = x
         self.debug_logger.debug(f'forward input vx.shape {vx.shape}, ax.shape {ax.shape}')
@@ -208,40 +200,30 @@ class AVE3NetModule(nn.Module):
         audio_encoded = self.encoder(ax)
         self.debug_logger.debug(f'audio_encoded.shape {audio_encoded.shape}')
 
-        # outmap_min, _ = torch.min(audio_encoded, dim=1, keepdim=True)
-        # outmap_max, _ = torch.max(audio_encoded, dim=1, keepdim=True)
-        # ae = (audio_encoded - outmap_min) / (outmap_max - outmap_min)
-        # ae = ae.view(-1, 64)
-        # print(ae.size())
-        # ae = ae.detach().numpy()
-        # # print(audio_encoded.size())
-        # save_fig('audio_encoded.png', ae)
-
         ax = audio_encoded.transpose(1, 2)
         ax = self.l1(ax)
-        self.debug_logger.debug(f'ax.shape {ax.shape}')
+        self.debug_logger.debug(f'ax.shape after encoding and l1 {ax.shape}')
         ax = self.audio_projection_block(ax)
-        self.debug_logger.debug(f'ax.shape {ax.shape}')
+        self.debug_logger.debug(f'ax.shape after proj block {ax.shape}')
 
         ##############
 
         # video
 
-        self.debug_logger.debug(f'vx.shape {vx.shape}')
         n_frames = vx.size(1)
         vx = vx.view(-1, 3, 96, 96)  # [4, 71, 3, 96, 96] to [284, 3, 96, 96]
         vx = self.shufflenet(vx)
+        self.debug_logger.debug(f'vx.shape after shufflenet {vx.shape}')
         vx = vx.view(-1, n_frames, 1024)  # transform back
         vx = self.video_projection_block(vx)
-        # print('after projection blocks', 'audio', ax.shape, 'video', vx.shape)
+        self.debug_logger.debug(f'vx.shape after shufflenet and proj block {vx.shape}')
         ##############
 
         # LSMT blocks
 
         # upsample video
-        # self.debug_logger.debug(f'vx.shape/ax.shape {vx.shape}/{ax.shape} --- {vx[0].mean(1)}')
         vx = F.interpolate(vx.transpose(1, 2), ax.size(1)).transpose(1, 2)
-        # self.debug_logger.debug(f'vx.shape/ax.shape {vx.shape}/{ax.shape} --- {vx[0].mean(1)}')
+        self.debug_logger.debug(f'vx.shape/ax.shape after upsampling {vx.shape}/{ax.shape}')
         # initialize dense sums
         dense_audio = torch.zeros_like(ax)
         dense_video = torch.zeros_like(vx)
@@ -250,28 +232,29 @@ class AVE3NetModule(nn.Module):
         for lstm in self.lstm_blocks:
             (vx, ax), dense_audio, dense_video, ha, hv = lstm((vx, ax), dense_audio, dense_video, None, None)
         # self.ha, self.hv = ha, hv
+        self.debug_logger.debug(f'vx.shape/ax.shape after lsmts {vx.shape}/{ax.shape}')
 
         ##############
 
-        # final stage
+        # prediction
         ax, dense_audio = self.gsfusion((vx, ax), dense_audio)
+        self.debug_logger.debug(f'ax.shape after last fusion {ax.shape}')
         ax = self.mask_prediction(ax)
         ax = ax.transpose(1, 2)
-
-        # print('after sigmoid', ax.shape)
+        self.debug_logger.debug(f'ax.shape after mask prediction {ax.shape}')
 
         ax = ax * audio_encoded
-        # timee = time.time()
-        # print(f'FIRST {timee - times} -> {ax.shape}')
-        # times = time.time()
         ax = self.decoder(ax)
-        # timee = time.time()
-        # print(f'SECOND {timee - times}')
+        self.debug_logger.debug(f'ax.shape after decoder {ax.shape}')
         ax = ax[:, :, self.stride: -(rest + self.stride)].contiguous()  # B*C, 1, L
 
         ##############
 
+        ax = ax / torch.max(torch.abs(ax)) # normalize output to [-1; 1]
+
         self.debug_logger.debug(f'ax.mean {torch.mean(ax)}')
+        self.debug_logger.debug(f'ax.min {torch.min(ax)}')
+        self.debug_logger.debug(f'ax.max {torch.max(ax)}')
         self.debug_logger.debug('forward end')
 
         return ax
@@ -285,6 +268,7 @@ class AVE3Net(pl.LightningModule):
 
 
     def forward(self, x: Tuple[Tensor, Tensor]) -> Tensor:
+        # return x[1]
         return self.ave3net(x)
 
     def process_batch(self, batch: Tuple[List[Tensor], List[Tensor], List[Tensor]], batch_idx):
@@ -311,120 +295,49 @@ class AVE3Net(pl.LightningModule):
         return x_hat, clean
     
     def compute_loss(self, x_hat: Tensor, clean: Tensor) -> Tensor:
-
-        # print('LOSSSHAPES', x_hat.shape, clean.shape)
-
-        # self.debug_logger.debug(f'compute_loss start')
+        sisdr = scale_invariant_signal_distortion_ratio(x_hat, clean)
+        return -torch.mean(sisdr)
+    
+        # x_hat, x_hat_amp = compute_cprs_stft(x_hat)
+        # clean, clean_amp = compute_cprs_stft(clean)
+        # loss_amplitude = nn.functional.mse_loss(x_hat_amp, clean_amp)
+        # loss_phase = nn.functional.mse_loss(x_hat, clean)
+        # loss = 0.5 * loss_amplitude + 0.5 * loss_phase
+        # return loss
 
         # x_hat, clean = x_hat.squeeze(1), clean.squeeze(1)
-        # return nn.functional.mse_loss(x_hat, clean)
-
-        # # print('x_hat', torch.mean(x_hat))
-        # # print('clean', torch.mean(clean))
-
-        # x_hat_stft = torch.stft(x_hat, n_fft=512, win_length=400, hop_length=100, return_complex=True, pad_mode='constant')
-        # clean_stft = torch.stft(clean, n_fft=512, win_length=400, hop_length=100, return_complex=True, pad_mode='constant')
+        # # return nn.functional.mse_loss(x_hat, clean)
+        # x_hat_stft = torch.stft(x_hat, n_fft=512, win_length=25, hop_length=10, return_complex=True, pad_mode='constant')
+        # clean_stft = torch.stft(clean, n_fft=512, win_length=25, hop_length=10, return_complex=True, pad_mode='constant')
+        # # print('x_hat_stft.shape', x_hat_stft.shape, x_hat_stft.dtype)
         # x_hat_stft_as_real, clean_stft_as_real = torch.view_as_real(x_hat_stft), torch.view_as_real(clean_stft)
-
+        # # print('x_hat_stft_as_real.shape', x_hat_stft_as_real.shape, x_hat_stft_as_real.dtype)
         # x_hat_stft_real, x_hat_stft_imag = x_hat_stft_as_real[:, :, :, 0], x_hat_stft_as_real[:, :, :, 1]
         # clean_stft_real, clean_stft_imag = clean_stft_as_real[:, :, :, 0], clean_stft_as_real[:, :, :, 1]
-        
-
         # x_hat_amplitude = torch.sqrt(x_hat_stft_real**2 + x_hat_stft_imag**2)
         # clean_amplitude = torch.sqrt(clean_stft_real**2 + clean_stft_imag**2)
-
+        # # print('x_hat_amplitude.shape', x_hat_amplitude.shape, x_hat_amplitude.dtype)
         # x_hat_amplitude_cpr = x_hat_amplitude ** 0.3
         # clean_amplitude_cpr = clean_amplitude ** 0.3
-
-        # x_hat_cprs = x_hat_stft_as_real * (x_hat_amplitude_cpr / (x_hat_amplitude + 1e-12)).unsqueeze(1)
-        # clean_cprs = clean_stft_as_real * (clean_amplitude_cpr / (clean_amplitude + 1e-12)).unsqueeze(1)
-
-        # # x_hat_angle = torch.atan2(x_hat_stft_real, x_hat_stft_imag)
-        # # clean_angle = torch.atan2(clean_stft_real, clean_stft_imag)
-
-        # # x_hat_stft = torch.exp(1j * torch.angle(x_hat_stft)) * x_hat_amplitude
-        # # clean_stft = torch.exp(1j * torch.angle(clean_stft)) * clean_amplitude
-
+        # # print('x_hat_amplitude_cpr.shape', x_hat_amplitude_cpr.shape, x_hat_amplitude_cpr.dtype)
+        # x_hat_cprs = x_hat_stft_as_real * (x_hat_amplitude_cpr / (x_hat_amplitude + 1e-12)).unsqueeze(3)
+        # clean_cprs = clean_stft_as_real * (clean_amplitude_cpr / (clean_amplitude + 1e-12)).unsqueeze(3)
+        # # print('x_hat_cprs.shape', x_hat_cprs.shape, x_hat_cprs.dtype)
         # loss_amplitude = nn.functional.mse_loss(x_hat_amplitude_cpr, clean_amplitude_cpr)
         # loss_phase = nn.functional.mse_loss(x_hat_cprs, clean_cprs)
-
-
-
-        # # x_hat_amplitude = torch.abs(x_hat_stft)
-        # # clean_amplitude = torch.abs(clean_stft)
-        # # x_hat_stft_compressed = torch.exp(1j * torch.angle(x_hat_stft)) * x_hat_amplitude**0.3
-        # # clean_stft_compressed = torch.exp(1j * torch.angle(clean_stft)) * clean_amplitude**0.3
-
-        # # print('x_hat_stft_as_real', torch.mean(x_hat_stft_as_real))
-        # # print('clean_stft_as_real', torch.mean(clean_stft_as_real))
-
-        # # x_hat_amplitude_compressed = torch.abs(x_hat_stft_compressed)
-        # # clean_amplitude_compressed = torch.abs(clean_stft_compressed)
-
-        # # print('x_hat_amplitude_compressed', torch.mean(x_hat_amplitude_compressed))
-        # # print('clean_amplitude_compressed', torch.mean(clean_amplitude_compressed))
-
-        # # loss_amplitude = nn.functional.mse_loss(x_hat_amplitude_compressed, clean_amplitude_compressed)
-        # # loss_phase = nn.functional.mse_loss(x_hat_stft_as_real, clean_stft_as_real)
-
-        # # print('loss_amplitude', loss_amplitude)
-        # # print('loss_phase', loss_phase)
-
         # loss = 0.5 * loss_amplitude + 0.5 * loss_phase
-
-        # self.debug_logger.debug(f'compute_loss end')
+        # # return nn.functional.mse_loss(x_hat, clean)
         # return loss
-        x_hat, clean = x_hat.squeeze(1), clean.squeeze(1)
-        # return nn.functional.mse_loss(x_hat, clean)
-
-        x_hat_stft = torch.stft(x_hat, n_fft=512, win_length=25, hop_length=10, return_complex=True, pad_mode='constant')
-        clean_stft = torch.stft(clean, n_fft=512, win_length=25, hop_length=10, return_complex=True, pad_mode='constant')
-
-        # print('x_hat_stft.shape', x_hat_stft.shape, x_hat_stft.dtype)
-
-
-        x_hat_stft_as_real, clean_stft_as_real = torch.view_as_real(x_hat_stft), torch.view_as_real(clean_stft)
-
-        # print('x_hat_stft_as_real.shape', x_hat_stft_as_real.shape, x_hat_stft_as_real.dtype)
-
-        x_hat_stft_real, x_hat_stft_imag = x_hat_stft_as_real[:, :, :, 0], x_hat_stft_as_real[:, :, :, 1]
-        clean_stft_real, clean_stft_imag = clean_stft_as_real[:, :, :, 0], clean_stft_as_real[:, :, :, 1]
-        
-
-        x_hat_amplitude = torch.sqrt(x_hat_stft_real**2 + x_hat_stft_imag**2)
-        clean_amplitude = torch.sqrt(clean_stft_real**2 + clean_stft_imag**2)
-
-        # print('x_hat_amplitude.shape', x_hat_amplitude.shape, x_hat_amplitude.dtype)
-
-
-        x_hat_amplitude_cpr = x_hat_amplitude ** 0.3
-        clean_amplitude_cpr = clean_amplitude ** 0.3
-
-        # print('x_hat_amplitude_cpr.shape', x_hat_amplitude_cpr.shape, x_hat_amplitude_cpr.dtype)
-
-
-        x_hat_cprs = x_hat_stft_as_real * (x_hat_amplitude_cpr / (x_hat_amplitude + 1e-12)).unsqueeze(3)
-        clean_cprs = clean_stft_as_real * (clean_amplitude_cpr / (clean_amplitude + 1e-12)).unsqueeze(3)
-
-        # print('x_hat_cprs.shape', x_hat_cprs.shape, x_hat_cprs.dtype)
-    
-        loss_amplitude = nn.functional.mse_loss(x_hat_amplitude_cpr, clean_amplitude_cpr)
-        loss_phase = nn.functional.mse_loss(x_hat_cprs, clean_cprs)
-        loss = 0.5 * loss_amplitude + 0.5 * loss_phase
-
-        # return nn.functional.mse_loss(x_hat, clean)
-
-        return loss
 
 
     def training_step(self, batch: Tuple[List[Tensor], List[Tensor], List[Tensor]], batch_idx):
         x_hat, clean = self.process_batch(batch, batch_idx)
         loss = self.compute_loss(x_hat, clean)
         self.log("train_loss", loss, prog_bar=True, batch_size=24)
-        if batch_idx % 1000 == 0:
+        if batch_idx == 0:
             self.logger.experiment.add_audio(f"{self.current_epoch}_{batch_idx}_x_hat", x_hat[0], sample_rate=16000)
             self.logger.experiment.add_audio(f"{self.current_epoch}_{batch_idx}_clean", clean[0], sample_rate=16000)
-            self.logger.experiment.add_video(f"{self.current_epoch}_{batch_idx}_video", batch[0][0].unsqueeze(0), fps=25)
+            # self.logger.experiment.add_video(f"{self.current_epoch}_{batch_idx}_video", batch[0][0].unsqueeze(0), fps=25)
         return loss
 
     def validation_step(self, batch: Tuple[List[Tensor], List[Tensor], List[Tensor]], batch_idx):
@@ -452,8 +365,9 @@ class AVE3Net(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-4)
-        return optimizer
+        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-3)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 10, gamma=0.05)
+        return [optimizer], [scheduler]
     
 
 def loss(x_hat: Tensor, clean: Tensor):
@@ -497,6 +411,37 @@ def loss(x_hat: Tensor, clean: Tensor):
 
     return loss
 
+def compute_cprs_stft(x: Tensor):
+    stft = torch.stft(x.squeeze(1), 512, return_complex=True)
+    # print('stft.abs', stft.abs().shape)
+    # print('stft.angle', stft.angle().shape)
+    stft_amp_cpr = stft.abs() ** 0.3
+    stft_phase = torch.exp(1j * stft.angle())
+    stft_cpr = stft * stft_amp_cpr * stft_phase
+
+    return torch.view_as_real(stft_cpr), stft_amp_cpr
+
+    x = x.squeeze(1)
+    stft = torch.stft(x, 512, return_complex=True)
+    stft_real = torch.view_as_real(stft)
+    stft_abs = torch.abs(stft)
+    print(stft.shape)
+    print(stft_abs.shape)
+    print(torch.angle(stft).shape)
+    print(nn.functional.mse_loss(stft_abs, stft_abs))
+    print(nn.functional.mse_loss(stft_real, stft_real))
+    # stft = torch.view_as_real(torch.stft(x, 512, return_complex=True))
+    # x_real, x_imag = stft[0], stft[1]
+    # amp = torch.abs()
+
+def compute_loss(x_hat: Tensor, clean: Tensor) -> Tensor:
+    x_hat, x_hat_amp = compute_cprs_stft(x_hat)
+    clean, clean_amp = compute_cprs_stft(clean)
+    loss_amplitude = nn.functional.mse_loss(x_hat_amp, clean_amp)
+    loss_phase = nn.functional.mse_loss(x_hat, clean)
+    loss = 0.5 * loss_amplitude + 0.5 * loss_phase
+    return loss
+
 
 if __name__ == "__main__":
     # data = [(torch.rand((16, 25, 3, 96, 96)), torch.rand((16, 1, 16000)))]
@@ -507,4 +452,18 @@ if __name__ == "__main__":
 
     x_hat, clean = torch.rand((24, 1, 32000)), torch.rand((24, 1, 32000))
 
-    print(loss(x_hat, clean))
+    datamodule = DataModule(batch_size=24)
+    datamodule.setup("fit")
+
+    train_dataloader = datamodule.train_dataloader()
+    i = iter(train_dataloader)
+    batch: Tuple[Tensor, Tensor, Tensor] = next(i)
+    vframes, noisy, clean = batch
+
+    s, sa = compute_cprs_stft(clean)
+
+    print(sa.shape, sa.dtype)
+    print(s.shape, s.dtype)
+
+    loss = compute_loss(noisy, clean)
+    print('loss', loss)

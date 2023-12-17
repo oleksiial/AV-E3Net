@@ -1,7 +1,7 @@
 # lightning.pytorch==2.0.6
 seed_everything: 12345
 trainer:
-  # num_sanity_val_steps: 0
+  num_sanity_val_steps: 0
   # devices: 1
   # detect_anomaly: true
   # profiler:
@@ -13,7 +13,7 @@ trainer:
   callbacks:
     - class_path: lightning.pytorch.callbacks.EarlyStopping
       init_args:
-        patience: 7
+        patience: 15
         mode: min
         monitor: validation_loss
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
@@ -22,7 +22,9 @@ trainer:
         mode: min
         filename: checkpoint
   # fast_dev_run: true
-  max_epochs: 3
+  max_epochs: 30
+  # limit_train_batches: 0.01
+  # limit_val_batches: 0.01
   
   # max_steps: 2
   # deterministic: true # slows down training time
@@ -31,5 +33,25 @@ trainer:
 #   lr: 0.0005
 #   wd: 0.0001
 data:
-  batch_size: 24
-# ckpt_path: lightning_logs/version_106/checkpoints/checkpoint.ckpt
+  batch_size: 32
+ckpt_path: lightning_logs/version_150/checkpoints/checkpoint.ckpt
+
+
+# # lightning.pytorch==2.0.6
+# seed_everything: 12345
+# trainer:
+#   callbacks:
+#     - class_path: lightning.pytorch.callbacks.EarlyStopping
+#       init_args:
+#         patience: 15
+#         mode: min
+#         monitor: validation_loss
+#     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+#       init_args:
+#         monitor: validation_loss
+#         mode: min
+#         filename: checkpoint
+#   max_epochs: 50
+#   benchmark: true
+# data:
+#   batch_size: 16

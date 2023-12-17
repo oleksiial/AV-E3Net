@@ -98,3 +98,30 @@ Visual: illumination changes, occlusion and pose variations.
  Assist of text? find source. 
 Assist of picture only (source overview 5d)
 
+
+
+
+v145: 3.5 hours bad quality, shufflenet not pretrained, 7.5 SI-SDR
+
+AV:
+v155: 3.5 hours, shufflenet not pretrained, pesq 1.567, sisdr 7.8702, sdr 8.2921
+
+AO: 3.5 hours, pesq 1.409, sisdr 6.278, sdr 6.097
+
+NO enhancement: pesq 1.336, sisdr 5.060, sdr 5.173
+
+
+
+
+Presentation:
+
+introduction
+
+Methodology
+    resnet 
+
+model implementation
+
+
+
+consolusion

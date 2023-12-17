@@ -20,8 +20,9 @@ class Dataset(torch.utils.data.Dataset):
         self.clean_s1 = list(FileLister(root=(self.ROOT + '/' + self.split + '/s1')))
         self.clean_s2 = list(FileLister(root=(self.ROOT + '/' + self.split + '/s2')))
 
-        self.mix = self.mix + self.mix
-        self.clean = self.clean_s1 + self.clean_s2
+        # self.mix = self.mix + self.mix
+        # self.clean = self.clean_s1 + self.clean_s2
+        self.clean = self.clean_s1
 
     def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         self.logger.debug('__getitem__ start')
@@ -61,9 +62,19 @@ class Dataset(torch.utils.data.Dataset):
 
 
 if __name__ == '__main__':
-    dataset = Dataset('test')
-    vframes, noisy, clean, meta = dataset[2500]
-    print(len(dataset))
-    print(meta[0])
-    print(meta[1])
-    print(meta[2])
+    dataset = Dataset('train')
+    vframes, noisy, clean = dataset[2500]
+
+    # cwaveforms = torch.tensor([])
+
+    # i = 0
+
+    # for v, n, c in dataset:
+    #     cwaveforms = torch.cat((cwaveforms, n.unsqueeze(0)), 0)
+    #     i += 1
+    #     if i==100:
+    #         break
+
+    # print(cwaveforms.shape, cwaveforms.min(), cwaveforms.max())
+
+    print(len(dataset), dataset[0][1].shape)

@@ -6,6 +6,8 @@ from utils.plot_waveforms import plot_waveforms
 import utils.logger as logger
 from typing import List, Tuple
 from torch import Tensor
+import torchaudio
+import torchvision
 
 
 class DataModule(pl.LightningDataModule):
@@ -31,7 +33,7 @@ class DataModule(pl.LightningDataModule):
     def test_dataloader(self):
         return DataLoader(self.test, batch_size=self.batch_size, num_workers=12, collate_fn=self.collate_fn)
 
-    def collate_fn(self, batch: List[Tuple[Tensor, Tensor, Tensor]]) -> Tuple[List[Tensor], List[Tensor], List[Tensor]]:
+    def collate_fn(self, batch: List[Tuple[Tensor, Tensor, Tensor]]) -> Tuple[Tensor, Tensor, Tensor]:
         '''
             Because train/test items are of different length, they need to be regrouped before passing to the model to avoid different sizes in a batch.
             Dataset returns items of type: (vframes, noisy_waveform, clean_waveform)
@@ -67,3 +69,7 @@ if __name__ == "__main__":
     clean_waveform = clean_list[0]
 
     plot_waveforms(16000, [(noisy_waveform, 'noisy'), (clean_waveform, 'clean')])
+
+    torchvision.io.write_video('vframes.mp4', vframes.transpose(1,2).transpose(2,3), 25)
+    torchaudio.save("clean.wav", clean_waveform, 16000)
+    torchaudio.save("noisy.wav", noisy_waveform, 16000)

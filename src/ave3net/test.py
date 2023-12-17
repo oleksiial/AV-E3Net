@@ -13,26 +13,12 @@ datamodule.setup("test")
 
 test_dataloader = datamodule.test_dataloader()
 model = AVE3Net.load_from_checkpoint(
-    checkpoint_path="lightning_logs/version_133/checkpoints/checkpoint.ckpt",
+    checkpoint_path="lightning_logs/version_145/checkpoints/checkpoint.ckpt",
     map_location=torch.device('cpu')
 )
-
-
 # model = AVE3Net()
 
-# x = (video, noisy_audio)
 vframes, noisy, clean = test_dataloader.dataset[205]
-
-# preprocess = transforms.Compose([
-#     # transforms.Resize(256),
-#     # transforms.CenterCrop(224),
-#     transforms.ToTensor(),
-#     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-# ])
-
-# chunk for chunk 160 samples 1 frame
-# v = preprocess(v)
-
 
 def process_with_rtf(model: AVE3Net, vframes: torch.Tensor, noisy: torch.Tensor):
     print('process_with_rtf input', vframes.shape, noisy.shape)
@@ -40,7 +26,6 @@ def process_with_rtf(model: AVE3Net, vframes: torch.Tensor, noisy: torch.Tensor)
     # 640 samples = 40ms = 1 video frame. 16kHz/25fps
     # 160 samples = 10ms = 0.25 video frame. Every frame processed 4 times.
 
-    
 
     a = noisy.split(160, 1)[:-1]  # discard last incomplete chunk
     v = F.interpolate(vframes.transpose(0, 3), (vframes.size(-1), len(a))).transpose(0, 3)

@@ -2,10 +2,10 @@
 seed_everything: 12345
 trainer:
   #######  for testing
-  accelerator: cpu
+  # accelerator: cpu
   devices: 1
   #######
   benchmark: true # speeds up training time
 data:
-  batch_size: 24
-ckpt_path: lightning_logs/version_149/checkpoints/checkpoint.ckpt
+  batch_size: 32
+# ckpt_path: lightning_logs/version_154/checkpoints/checkpoint.ckpt
