@@ -10,7 +10,6 @@ from data.datamodule import DataModule
 from utils.save_fig import save_fig
 from utils.plot_waveforms import plot_waveforms
 from typing import List, Tuple
-from ave3net.shufflenet_encoder import _shufflenetv2_05
 from torchmetrics.functional.audio import scale_invariant_signal_distortion_ratio, perceptual_evaluation_speech_quality, signal_distortion_ratio
 import utils.logger as logger
 from torchaudio.transforms import AmplitudeToDB
@@ -29,46 +28,11 @@ class ProjectionBlock(nn.Module):
         return self.block(x)
 
 
-class GSFusion(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-        self.projection_block = ProjectionBlock(512, 512)
-        self.gate = nn.Sequential(
-            nn.Linear(1024, 512),
-            nn.ReLU(),
-            nn.Linear(512, 512),
-            nn.Sigmoid()
-        )
-        self.layernorm = nn.LayerNorm(512)
-
-    def forward(self, x, dense_audio):
-        vx, ax = x
-        # print('GS input', 'audio', ax.shape, 'video', vx.shape)
-        vx = torch.cat([ax, vx], dim=2)
-        vx = self.gate(vx)
-        dense_audio = dense_audio + ax
-        ax = ax * vx
-        ax = self.projection_block(ax)
-        ax = ax + dense_audio
-        ax = self.layernorm(ax)
-        # print('GS output', ax.shape)
-        return ax, dense_audio
-
-
 class LSTMBlock(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.gsfusion = GSFusion()
-
         self.map_to_high_dim_a = nn.Sequential(
-            nn.Linear(512, 1024), nn.PReLU(),
-            nn.Linear(1024, 512), nn.PReLU(),
-            nn.LayerNorm(512)
-        )
-
-        self.map_to_high_dim_v = nn.Sequential(
             nn.Linear(512, 1024), nn.PReLU(),
             nn.Linear(1024, 512), nn.PReLU(),
             nn.LayerNorm(512)
@@ -77,13 +41,9 @@ class LSTMBlock(nn.Module):
         self.lstm_a = nn.LSTM(512, 512)
         self.layer_norm_a = nn.LayerNorm(512)
         self.layer_norm_a2 = nn.LayerNorm(512)
-        self.lstm_v = nn.LSTM(512, 512)
-        self.layer_norm_v = nn.LayerNorm(512)
-        self.layer_norm_v2 = nn.LayerNorm(512)
 
-    def forward(self, x, dense_audio, dense_video, ha, hv):
-        vx, ax = x
-        ax, dense_audio = self.gsfusion((vx, ax), dense_audio)
+    def forward(self, x, dense_audio, ha):
+        ax = x
 
         ax = self.map_to_high_dim_a(ax)
         dense_audio = dense_audio + ax
@@ -92,23 +52,16 @@ class LSTMBlock(nn.Module):
         ax = ax + dense_audio
         ax = self.layer_norm_a2(ax)
 
-        vx = self.map_to_high_dim_v(vx)
-        dense_video = dense_video + vx
-        vx, hv = self.lstm_v(vx) if hv == None else self.lstm_v(vx, hv)
-        vx = self.layer_norm_v(vx)
-        vx += dense_video
-        vx = self.layer_norm_v2(vx)
-
-        return (vx, ax), dense_audio, dense_video, ha, hv
+        
+        return ax, dense_audio, ha
 
 
 class AVE3NetModule(nn.Module):
-    def __init__(self, fusion_block, n_lstm=4):
+    def __init__(self, n_lstm=4):
         super().__init__()
         self.debug_logger = logger.get_logger(self.__class__.__name__, logger.logging.NOTSET)
 
         self.ha = None
-        self.hv = None
 
         # audio
         self.window = 320
@@ -118,13 +71,6 @@ class AVE3NetModule(nn.Module):
         self.audio_projection_block = ProjectionBlock(2048, 512)
         self.mask_prediction = nn.Sequential(nn.Linear(512, 2048), nn.Sigmoid())
         self.decoder = nn.ConvTranspose1d(2048, 1, self.window, self.stride)
-
-        # video
-        self.shufflenet = _shufflenetv2_05()
-        self.video_projection_block = ProjectionBlock(1024, 512)
-
-        # fusion
-        self.gsfusion = fusion_block
 
         # LSTM
         self.lstm_blocks = nn.ModuleList()
@@ -169,7 +115,7 @@ class AVE3NetModule(nn.Module):
     #             print(name)
     #     print("on_before_opt exit")
 
-    def forward(self, x: Tuple[Tensor, Tensor]) -> Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         """
         x of shape (vx, ax)
 
@@ -179,18 +125,12 @@ class AVE3NetModule(nn.Module):
         """
         self.debug_logger.debug('forward start')
 
-        vx, ax = x
-        self.debug_logger.debug(f'forward input vx.shape {vx.shape}, ax.shape {ax.shape}')
-
-        if vx.dim() not in [4, 5]:
-            raise RuntimeError(f"AV-E3Net video input wrong shape: {vx.shape}")
+        ax = x
 
         if ax.dim() not in [2, 3]:
             raise RuntimeError(f"AV-E3Net audio input wrong shape: {ax.shape}")
 
         # add minibatch dim to inputs
-        if vx.dim() == 4:
-            vx = vx.unsqueeze(0)
         if ax.dim() == 2:
             ax = ax.unsqueeze(0)
 
@@ -208,36 +148,18 @@ class AVE3NetModule(nn.Module):
 
         ##############
 
-        # video
-
-        n_frames = vx.size(1)
-        vx = vx.view(-1, 3, 96, 96)  # [4, 71, 3, 96, 96] to [284, 3, 96, 96]
-        vx = self.shufflenet(vx)
-        self.debug_logger.debug(f'vx.shape after shufflenet {vx.shape}')
-        vx = vx.view(-1, n_frames, 1024)  # transform back
-        vx = self.video_projection_block(vx)
-        self.debug_logger.debug(f'vx.shape after shufflenet and proj block {vx.shape}')
-        ##############
-
         # LSMT blocks
-
-        # upsample video
-        vx = F.interpolate(vx.transpose(1, 2), ax.size(1)).transpose(1, 2)
-        self.debug_logger.debug(f'vx.shape/ax.shape after upsampling {vx.shape}/{ax.shape}')
-        # initialize dense sums
+      
         dense_audio = torch.zeros_like(ax)
-        dense_video = torch.zeros_like(vx)
 
         # ha, hv = self.ha, self.hv
         for lstm in self.lstm_blocks:
-            (vx, ax), dense_audio, dense_video, ha, hv = lstm((vx, ax), dense_audio, dense_video, None, None)
+            ax, dense_audio, ha = lstm(ax, dense_audio, None)
         # self.ha, self.hv = ha, hv
-        self.debug_logger.debug(f'vx.shape/ax.shape after lsmts {vx.shape}/{ax.shape}')
 
         ##############
 
         # prediction
-        ax, dense_audio = self.gsfusion((vx, ax), dense_audio)
         self.debug_logger.debug(f'ax.shape after last fusion {ax.shape}')
         ax = self.mask_prediction(ax)
         ax = ax.transpose(1, 2)
@@ -264,30 +186,31 @@ class AVE3Net(pl.LightningModule):
     def __init__(self):
         super().__init__()
         self.debug_logger = logger.get_logger(self.__class__.__name__, logger.logging.NOTSET)
-        self.ave3net = AVE3NetModule(GSFusion(), 4)
+        self.ave3net = AVE3NetModule(4)
 
 
     def forward(self, x: Tuple[Tensor, Tensor]) -> Tensor:
         # return x[1]
-        return self.ave3net(x)
+        # print('INPUT', x[0].shape, x[1].shape)
+        return self.ave3net(x[1])
 
     def process_batch(self, batch: Tuple[List[Tensor], List[Tensor], List[Tensor]], batch_idx):
         video, noisy, clean = batch
         self.debug_logger.debug(f'process_batch input video[0]{video[0].shape}, noisy[0]{noisy[0].shape}')
 
         # convert audios from [1, T] to [T, 1] for pad_sequence
-        # noisy = [x.transpose(0, 1) for x in noisy]
-        # clean = [x.transpose(0, 1) for x in clean]
+        noisy = [x.transpose(0, 1) for x in noisy]
+        clean = [x.transpose(0, 1) for x in clean]
 
-        # # video = torch.stack((video))
-        # # noisy = torch.stack((noisy)).transpose(1, 2)
-        # # clean = torch.stack((clean)).transpose(1, 2)
+        # video = torch.stack((video))
+        # noisy = torch.stack((noisy)).transpose(1, 2)
+        # clean = torch.stack((clean)).transpose(1, 2)
 
-        # # pad batch to max size
-        # # audios transposed back to [1, T] after padding
-        # video = nn.utils.rnn.pad_sequence(video, batch_first=True)
-        # noisy = nn.utils.rnn.pad_sequence(noisy, batch_first=True).transpose(1, 2)
-        # clean = nn.utils.rnn.pad_sequence(clean, batch_first=True).transpose(1, 2)
+        # pad batch to max size
+        # audios transposed back to [1, T] after padding
+        video = nn.utils.rnn.pad_sequence(video, batch_first=True)
+        noisy = nn.utils.rnn.pad_sequence(noisy, batch_first=True).transpose(1, 2)
+        clean = nn.utils.rnn.pad_sequence(clean, batch_first=True).transpose(1, 2)
         # padded video [16, 153, 3, 96, 96], noisy [16, 1, 98304], clean [16, 1, 98304]
         self.debug_logger.debug(f'padded video {video.shape}, noisy {noisy.shape}, clean {clean.shape}')
 

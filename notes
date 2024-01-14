@@ -39,89 +39,36 @@ check different amount audio/video lsmt block +
 check loss function: negative si-sdr OR stft with power-law compressed phase-aware (PLCPA)
 take default torch stft + PLCPA
 
-BA structure:
-
-\section{Introduction}
-
-tell story, non-technical
-
-0. General introduction
-1. Audio-only with limitations
-2. AV SE benefits Video importance
-3. AV-SE in real time on CPU
-ADD structure of BA
-
-\section{Problem}
- Problem formulation source avseOverview chapter 2
- real-time capabilities on cpu
-try to avoid repetition from introduction
-
-
-\section{Related work}
-
-add more details, technical
-
- AO-SE problem with interfering speakers
- Personalized speech enhancement 
- Assist of video AV-SE
-About deep learning :
-Summary of E3Net + ConvTASNET
-- Summary of deeper model architecture papers
-ResNet
-DenseNet
-
-\section{Methodology}
- Model overview
- Audio:
-     Conv encoder and conv encoder vs STFT
-    Layernorm ?
-     Enhancement network (masking network) what is LSTM (RNN, Seq2Seq models overview 7b) 
-     Audio decoder
- Dense connection module genauer angucken!
- Video:
-     ShuffleNetV2 vs alternatives ([22,23]) preprocessing
-     only crops of the target faces are considered (overview ch 5a)
-Fusion module
- Describe all metrics (WER, PESQ, SDR, RTF)
-
-\section{Training, Testing and Evaluation}
- Preparation of datasets (LRS3_30h)
- Results
-
-\section{Conclusion}
- pro and contra, limitations and benefits of the method
-Compared to knowledge-based approaches
-Audio: several targeted speakers (?)
-Visual: illumination changes, occlusion and pose variations.
-
-\subsection{Future work}
- Assist of text? find source. 
-Assist of picture only (source overview 5d)
-
-
-
-
-v145: 3.5 hours bad quality, shufflenet not pretrained, 7.5 SI-SDR
 
 AV:
-v155: 3.5 hours, shufflenet not pretrained, pesq 1.567, sisdr 7.8702, sdr 8.2921
+v154/155: 3.5 hours, shufflenet not pretrained, pesq 1.567, sisdr 7.8702, sdr 8.2921
 
-AO: 3.5 hours, pesq 1.409, sisdr 6.278, sdr 6.097
+
+------------------------------------------
+AO v168
+pesq               1.500550139061314
+sdr               7.686269760131836
+sisdr             7.3201680183410645
+-----------------------------------------
 
 NO enhancement: pesq 1.336, sisdr 5.060, sdr 5.173
 
 
+TODO
+
+test pretrained/not pretrained shufflenet
+stft encoder/decoder
+
+scheduler different parameters
 
 
-Presentation:
-
-introduction
-
-Methodology
-    resnet 
-
-model implementation
+compare to
 
 
+improve metrics
+check online convtasnet model for comparison
 
-consolusion
+speaker extraction task
+clear definieren
+
+check other dataset 

@@ -2,6 +2,7 @@ import torchaudio
 from data.datamodule import DataModule
 from utils.plot_waveforms import plot_waveforms
 from ave3net.model import AVE3Net
+# from ave3net.model_AO import AVE3Net
 import torch
 from torchvision import transforms
 import time
@@ -13,7 +14,7 @@ datamodule.setup("test")
 
 test_dataloader = datamodule.test_dataloader()
 model = AVE3Net.load_from_checkpoint(
-    checkpoint_path="lightning_logs/version_145/checkpoints/checkpoint.ckpt",
+    checkpoint_path="lightning_logs/version_154/checkpoints/checkpoint.ckpt",
     map_location=torch.device('cpu')
 )
 # model = AVE3Net()

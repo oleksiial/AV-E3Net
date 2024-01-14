@@ -1,10 +1,11 @@
 import lightning.pytorch as pl
+import torch
 from torch.utils.data import DataLoader
 from ave3net.dataset import Dataset
 from utils.plot_waveforms import plot_waveforms
 import utils.logger as logger
 from typing import List, Tuple
-from torch import Tensor
+from torch import Tensor, nn
 
 
 class DataModule(pl.LightningDataModule):
@@ -46,10 +47,25 @@ class DataModule(pl.LightningDataModule):
         self.logger.debug(
             f'collate input: batch[0][0].shape {batch[0][0].shape}, batch[0][1].shape {batch[0][1].shape}, batch[0][2].shape {batch[0][2].shape}')
         video = [item[0] for item in batch]
-        noisy = [item[1] for item in batch]
-        clean = [item[2] for item in batch]
+        noisy = [item[1].transpose(0, 1) for item in batch]
+        clean = [item[2].transpose(0, 1) for item in batch]
         self.logger.debug(f'collate output: {video[0].shape} {noisy[0].shape} {clean[0].shape}')
+
+        # noisy = [x.transpose(0, 1) for x in noisy]
+        # clean = [x.transpose(0, 1) for x in clean]
+
+        # video = torch.stack((video))
+        # noisy = torch.stack((noisy)).transpose(1, 2)
+        # clean = torch.stack((clean)).transpose(1, 2)
+
+        # pad batch to max size
+        # audios transposed back to [1, T] after padding
+        video = nn.utils.rnn.pad_sequence(video, batch_first=True)
+        noisy = nn.utils.rnn.pad_sequence(noisy, batch_first=True).transpose(1, 2)
+        clean = nn.utils.rnn.pad_sequence(clean, batch_first=True).transpose(1, 2)
+
         return video, noisy, clean
+        # return video, noisy, clean
 
 
 if __name__ == "__main__":
