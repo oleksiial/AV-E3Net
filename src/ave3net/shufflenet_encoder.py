@@ -26,9 +26,9 @@ class ShuffleNetV2Encoder05(ShuffleNetV2):
 
 def _shufflenetv2_05() -> ShuffleNetV2Encoder05:
     model = ShuffleNetV2Encoder05()
-    # model_url = "https://download.pytorch.org/models/shufflenetv2_x0.5-f707e7126e.pth"
-    # state_dict = load_state_dict_from_url(model_url, progress=True)
-    # del state_dict['fc.weight']
-    # del state_dict['fc.bias']
-    # model.load_state_dict(state_dict)
+    model_url = "https://download.pytorch.org/models/shufflenetv2_x0.5-f707e7126e.pth"
+    state_dict = load_state_dict_from_url(model_url, progress=True)
+    del state_dict['fc.weight']
+    del state_dict['fc.bias']
+    model.load_state_dict(state_dict)
     return model

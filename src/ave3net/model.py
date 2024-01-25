@@ -107,8 +107,8 @@ class AVE3NetModule(nn.Module):
         super().__init__()
         self.debug_logger = logger.get_logger(self.__class__.__name__, logger.logging.NOTSET)
 
-        self.ha = None
-        self.hv = None
+        self.ha = [None] * n_lstm
+        self.hv = [None] * n_lstm
 
         # audio
         self.window = 320
@@ -198,6 +198,7 @@ class AVE3NetModule(nn.Module):
 
         ax, rest = self.pad_signal(ax)
         audio_encoded = self.encoder(ax)
+        # audio_encoded = torch.stft(ax, n_fft = 512, win_length=self.window, hop_length=self.stride, return_complex=True)
         self.debug_logger.debug(f'audio_encoded.shape {audio_encoded.shape}')
 
         ax = audio_encoded.transpose(1, 2)
@@ -228,9 +229,13 @@ class AVE3NetModule(nn.Module):
         dense_audio = torch.zeros_like(ax)
         dense_video = torch.zeros_like(vx)
 
+        # print(self.ha[0] is None)
+
         # ha, hv = self.ha, self.hv
-        for lstm in self.lstm_blocks:
-            (vx, ax), dense_audio, dense_video, ha, hv = lstm((vx, ax), dense_audio, dense_video, None, None)
+        for i, lstm in enumerate(self.lstm_blocks):
+            (vx, ax), dense_audio, dense_video, ha, hv = lstm((vx, ax), dense_audio, dense_video, self.ha[i], self.hv[i])
+            self.ha[i] = ha
+            self.hv[i] = hv
         # self.ha, self.hv = ha, hv
         self.debug_logger.debug(f'vx.shape/ax.shape after lsmts {vx.shape}/{ax.shape}')
 
@@ -295,6 +300,9 @@ class AVE3Net(pl.LightningModule):
         return x_hat, clean
     
     def compute_loss(self, x_hat: Tensor, clean: Tensor) -> Tensor:
+
+        # return compute_loss(x_hat, clean)
+
         sisdr = scale_invariant_signal_distortion_ratio(x_hat, clean)
         return -torch.mean(sisdr)
     
@@ -366,104 +374,117 @@ class AVE3Net(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=1e-3)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 10, gamma=0.05)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 10, gamma=0.5)
         return [optimizer], [scheduler]
     
 
-def loss(x_hat: Tensor, clean: Tensor):
-    x_hat, clean = x_hat.squeeze(1), clean.squeeze(1)
-    # return nn.functional.mse_loss(x_hat, clean)
+# def loss(x_hat: Tensor, clean: Tensor):
+#     x_hat, clean = x_hat.squeeze(1), clean.squeeze(1)
+#     # return nn.functional.mse_loss(x_hat, clean)
 
-    x_hat_stft = torch.stft(x_hat, n_fft=512, win_length=400, hop_length=100, return_complex=True, pad_mode='constant')
-    clean_stft = torch.stft(clean, n_fft=512, win_length=400, hop_length=100, return_complex=True, pad_mode='constant')
+#     x_hat_stft = torch.stft(x_hat, n_fft=512, win_length=400, hop_length=100, return_complex=True, pad_mode='constant')
+#     clean_stft = torch.stft(clean, n_fft=512, win_length=400, hop_length=100, return_complex=True, pad_mode='constant')
 
-    # print('x_hat_stft.shape', x_hat_stft.shape, x_hat_stft.dtype)
+#     # print('x_hat_stft.shape', x_hat_stft.shape, x_hat_stft.dtype)
 
 
-    x_hat_stft_as_real, clean_stft_as_real = torch.view_as_real(x_hat_stft), torch.view_as_real(clean_stft)
+#     x_hat_stft_as_real, clean_stft_as_real = torch.view_as_real(x_hat_stft), torch.view_as_real(clean_stft)
 
-    # print('x_hat_stft_as_real.shape', x_hat_stft_as_real.shape, x_hat_stft_as_real.dtype)
+#     # print('x_hat_stft_as_real.shape', x_hat_stft_as_real.shape, x_hat_stft_as_real.dtype)
 
-    x_hat_stft_real, x_hat_stft_imag = x_hat_stft_as_real[:, :, :, 0], x_hat_stft_as_real[:, :, :, 1]
-    clean_stft_real, clean_stft_imag = clean_stft_as_real[:, :, :, 0], clean_stft_as_real[:, :, :, 1]
+#     x_hat_stft_real, x_hat_stft_imag = x_hat_stft_as_real[:, :, :, 0], x_hat_stft_as_real[:, :, :, 1]
+#     clean_stft_real, clean_stft_imag = clean_stft_as_real[:, :, :, 0], clean_stft_as_real[:, :, :, 1]
     
 
-    x_hat_amplitude = torch.sqrt(x_hat_stft_real**2 + x_hat_stft_imag**2)
-    clean_amplitude = torch.sqrt(clean_stft_real**2 + clean_stft_imag**2)
+#     x_hat_amplitude = torch.sqrt(x_hat_stft_real**2 + x_hat_stft_imag**2)
+#     clean_amplitude = torch.sqrt(clean_stft_real**2 + clean_stft_imag**2)
 
-    # print('x_hat_amplitude.shape', x_hat_amplitude.shape, x_hat_amplitude.dtype)
-
-
-    x_hat_amplitude_cpr = x_hat_amplitude ** 0.3
-    clean_amplitude_cpr = clean_amplitude ** 0.3
-
-    # print('x_hat_amplitude_cpr.shape', x_hat_amplitude_cpr.shape, x_hat_amplitude_cpr.dtype)
+#     # print('x_hat_amplitude.shape', x_hat_amplitude.shape, x_hat_amplitude.dtype)
 
 
-    x_hat_cprs = x_hat_stft_as_real * (x_hat_amplitude_cpr / (x_hat_amplitude + 1e-12)).unsqueeze(3)
-    clean_cprs = clean_stft_as_real * (clean_amplitude_cpr / (clean_amplitude + 1e-12)).unsqueeze(3)
+#     x_hat_amplitude_cpr = x_hat_amplitude ** 0.3
+#     clean_amplitude_cpr = clean_amplitude ** 0.3
 
-    # print('x_hat_cprs.shape', x_hat_cprs.shape, x_hat_cprs.dtype)
+#     # print('x_hat_amplitude_cpr.shape', x_hat_amplitude_cpr.shape, x_hat_amplitude_cpr.dtype)
+
+
+#     x_hat_cprs = x_hat_stft_as_real * (x_hat_amplitude_cpr / (x_hat_amplitude + 1e-12)).unsqueeze(3)
+#     clean_cprs = clean_stft_as_real * (clean_amplitude_cpr / (clean_amplitude + 1e-12)).unsqueeze(3)
+
+#     # print('x_hat_cprs.shape', x_hat_cprs.shape, x_hat_cprs.dtype)
    
-    loss_amplitude = nn.functional.mse_loss(x_hat_amplitude_cpr, clean_amplitude_cpr)
-    loss_phase = nn.functional.mse_loss(x_hat_cprs, clean_cprs)
-    loss = 0.5 * loss_amplitude + 0.5 * loss_phase
+#     loss_amplitude = nn.functional.mse_loss(x_hat_amplitude_cpr, clean_amplitude_cpr)
+#     loss_phase = nn.functional.mse_loss(x_hat_cprs, clean_cprs)
+#     loss = 0.5 * loss_amplitude + 0.5 * loss_phase
 
-    return loss
+#     return loss
 
-def compute_cprs_stft(x: Tensor):
-    stft = torch.stft(x.squeeze(1), 512, return_complex=True)
-    # print('stft.abs', stft.abs().shape)
-    # print('stft.angle', stft.angle().shape)
-    stft_amp_cpr = stft.abs() ** 0.3
-    stft_phase = torch.exp(1j * stft.angle())
-    stft_cpr = stft * stft_amp_cpr * stft_phase
+# def replace_denormals(x: torch.tensor, threshold=1e-8):
+#     y = x.clone()
+#     y[(x < threshold) & (x > -1.0 * threshold)] = threshold
+#     return y
 
-    return torch.view_as_real(stft_cpr), stft_amp_cpr
+# def compute_cprs_stft(x: Tensor):
+#     stft = torch.stft(x.squeeze(1), 512, return_complex=True)
+#     # print('stft.abs', stft.abs().shape)
+#     # print('stft.angle', stft.angle().shape)
+#     stft_amp_cpr = stft.abs() ** 0.3
+#     stft_phase = torch.exp(1j * stft.angle())
 
-    x = x.squeeze(1)
-    stft = torch.stft(x, 512, return_complex=True)
-    stft_real = torch.view_as_real(stft)
-    stft_abs = torch.abs(stft)
-    print(stft.shape)
-    print(stft_abs.shape)
-    print(torch.angle(stft).shape)
-    print(nn.functional.mse_loss(stft_abs, stft_abs))
-    print(nn.functional.mse_loss(stft_real, stft_real))
-    # stft = torch.view_as_real(torch.stft(x, 512, return_complex=True))
-    # x_real, x_imag = stft[0], stft[1]
-    # amp = torch.abs()
+#     angle = replace_denormals(stft.angle())
+#     mag = replace_denormals(stft.abs()**(1/1))
+#     stft_cpr =  mag * torch.exp(1j * angle)
 
-def compute_loss(x_hat: Tensor, clean: Tensor) -> Tensor:
-    x_hat, x_hat_amp = compute_cprs_stft(x_hat)
-    clean, clean_amp = compute_cprs_stft(clean)
-    loss_amplitude = nn.functional.mse_loss(x_hat_amp, clean_amp)
-    loss_phase = nn.functional.mse_loss(x_hat, clean)
-    loss = 0.5 * loss_amplitude + 0.5 * loss_phase
-    return loss
+#     # stft_amp_cpr = replace_denormals(stft.abs() ** 0.3)
+#     # stft_phase = replace_denormals(torch.exp(1j * stft.angle()))
+#     # stft_cpr = stft * stft_amp_cpr * stft_phase
+
+#     return torch.view_as_real(stft_cpr), mag
+
+#     x = x.squeeze(1)
+#     stft = torch.stft(x, 512, return_complex=True)
+#     stft_real = torch.view_as_real(stft)
+#     stft_abs = torch.abs(stft)
+#     print(stft.shape)
+#     print(stft_abs.shape)
+#     print(torch.angle(stft).shape)
+#     print(nn.functional.mse_loss(stft_abs, stft_abs))
+#     print(nn.functional.mse_loss(stft_real, stft_real))
+#     # stft = torch.view_as_real(torch.stft(x, 512, return_complex=True))
+#     # x_real, x_imag = stft[0], stft[1]
+#     # amp = torch.abs()
+
+# def compute_loss(x_hat: Tensor, clean: Tensor) -> Tensor:
+#     x_hat, x_hat_amp = compute_cprs_stft(x_hat)
+#     clean, clean_amp = compute_cprs_stft(clean)
+#     loss_amplitude = nn.functional.mse_loss(x_hat_amp, clean_amp)
+#     loss_phase = nn.functional.mse_loss(x_hat, clean)
+#     loss = 0.5 * loss_amplitude + 0.5 * loss_phase
+#     return loss
+
 
 
 if __name__ == "__main__":
-    # data = [(torch.rand((16, 25, 3, 96, 96)), torch.rand((16, 1, 16000)))]
-    # summary(AVE3Net(), input_data=data, col_names=["input_size",
-    #                                                "output_size",
-    #                                                "num_params"], depth=2)
+    data = [(torch.rand((16, 25, 3, 96, 96)), torch.rand((16, 1, 16000)))]
+    summary(AVE3Net(), input_data=data, col_names=["input_size",
+                                                   "output_size",
+                                                   "num_params"], depth=3)
     # summary(AVE3Net(), input_size=(1, 60000))
 
-    x_hat, clean = torch.rand((24, 1, 32000)), torch.rand((24, 1, 32000))
+    # x_hat, clean = torch.rand((24, 1, 32000)), torch.rand((24, 1, 32000))
 
-    datamodule = DataModule(batch_size=24)
-    datamodule.setup("fit")
+    # datamodule = DataModule(batch_size=24)
+    # datamodule.setup("fit")
 
-    train_dataloader = datamodule.train_dataloader()
-    i = iter(train_dataloader)
-    batch: Tuple[Tensor, Tensor, Tensor] = next(i)
-    vframes, noisy, clean = batch
+    # train_dataloader = datamodule.train_dataloader()
+    # i = iter(train_dataloader)
+    # batch: Tuple[Tensor, Tensor, Tensor] = next(i)
+    # vframes, noisy, clean = batch
 
-    s, sa = compute_cprs_stft(clean)
+    # s, sa = compute_cprs_stft(clean)
 
-    print(sa.shape, sa.dtype)
-    print(s.shape, s.dtype)
+    # print(sa.shape, sa.dtype)
+    # print(s.shape, s.dtype)
 
-    loss = compute_loss(noisy, clean)
-    print('loss', loss)
+    # loss = compute_loss(noisy, clean)
+    # print('loss', loss)

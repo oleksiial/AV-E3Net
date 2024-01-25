@@ -1,8 +1,8 @@
 from lightning import Trainer
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.profilers import PyTorchProfiler, SimpleProfiler
-from ave3net.datamodule import DataModule
-# from data.datamodule import DataModule
+# from ave3net.datamodule import DataModule
+from data.datamodule import DataModule
 # from ave3net.model_AO import AVE3Net
 from ave3net.model import AVE3Net
 import sys

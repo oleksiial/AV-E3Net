@@ -8,4 +8,4 @@ trainer:
   benchmark: true # speeds up training time
 data:
   batch_size: 32
-ckpt_path: lightning_logs/version_168/checkpoints/checkpoint.ckpt
+ckpt_path: lightning_logs/version_189/checkpoints/checkpoint.ckpt

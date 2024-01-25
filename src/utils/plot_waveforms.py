@@ -14,6 +14,7 @@ def plot_waveforms(sample_rate, items: List[Tuple[torch.Tensor, str]]):
 
     for i, (waveform, title) in enumerate(items):
         plt.subplot(len(items), 1, i+1)
+        plt.ylim(-1, 1)
         plt.plot(time_axis, waveform[0])
         plt.title(title)
 
